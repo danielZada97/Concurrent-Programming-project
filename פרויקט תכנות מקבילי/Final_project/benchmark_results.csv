@@ -1,0 +1,15 @@
+Implementation,Threads,Time(sec),Throughput(ops/sec)
+Normal CBPQ,1,0.008,118427
+Normal CBPQ,2,0.003,590197
+Normal CBPQ,4,0.005,853297
+Normal CBPQ,8,0.010,820092
+Normal CBPQ,16,0.013,1189511
+Normal CBPQ,32,0.009,3398290
+Normal CBPQ,64,0.032,1983819
+Improved CBPQ,1,0.014,71705
+Improved CBPQ,2,0.018,110171
+Improved CBPQ,4,0.013,303831
+Improved CBPQ,8,0.059,135884
+Improved CBPQ,16,0.088,181479
+Improved CBPQ,32,0.140,228683
+Improved CBPQ,64,0.189,339049

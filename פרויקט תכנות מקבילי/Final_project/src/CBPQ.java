@@ -4,16 +4,37 @@ import java.util.Random;
 import java.util.Arrays;
 
 public class CBPQ {
+    // Constants for skip list
     private static final int MAX_LEVEL = 16;
     private static final double PROB = 0.5;
-    private static final int CHUNK_CAPACITY = 10;
-    private static final int INITIAL_RANGE = 20;
-    private static final int NUM_THREADS = 10;
-    private static final int RANGE = 1000;
-    private static final int INSERTIONS = 100;
-    private static final int DELETIONS = 100;
 
-    private static class SortedChunk {
+    // Parameters supplied via the constructor
+    private final int chunkCapacity;    // Capacity for each chunk
+    private final int initialRange;     // Range for each chunk
+    private final int numThreads;       // Number of threads for the test
+    private final int range;            // Upper bound for random numbers
+    private final int insertions;       // Number of insertions per producer thread
+    private final int deletions;        // Number of deletions per consumer thread
+
+    private final SkipNode head;  // Head of the skip list
+    private final Random random;
+
+    // Constructor that receives all parameters
+    public CBPQ(int numThreads, int insertions, int deletions, int range, int chunkCapacity, int initialRange) {
+        this.numThreads = numThreads;
+        this.insertions = insertions;
+        this.deletions = deletions;
+        this.range = range;
+        this.chunkCapacity = chunkCapacity;
+        this.initialRange = initialRange;
+        this.random = new Random();
+        head = new SkipNode(Integer.MIN_VALUE, null, MAX_LEVEL);
+    }
+
+    // ------------------ SortedChunk Class ------------------
+    // This class represents a chunk that stores values in a sorted (or unsorted) array.
+    // It uses the instance field 'chunkCapacity' to determine fullness.
+    private class SortedChunk {
         final int minKey;
         final int maxKey;
         final AtomicReference<long[]> sortedArray;
@@ -33,7 +54,7 @@ public class CBPQ {
         }
 
         boolean isFull() {
-            return sortedArray.get().length >= CHUNK_CAPACITY;
+            return sortedArray.get().length >= chunkCapacity;
         }
 
         boolean contains(long value) {
@@ -52,14 +73,14 @@ public class CBPQ {
         boolean insert(long value) {
             while (true) {
                 long[] arr = sortedArray.get();
-                if (arr.length >= CHUNK_CAPACITY)
+                if (arr.length >= chunkCapacity)
                     return false;
                 if (contains(value))
                     return false;
                 long[] newArr = new long[arr.length + 1];
                 if (isSorted) {
                     int pos = Arrays.binarySearch(arr, value);
-                    int insertPos = ~pos;
+                    int insertPos = (pos < 0) ? ~pos : pos;
                     System.arraycopy(arr, 0, newArr, 0, insertPos);
                     newArr[insertPos] = value;
                     System.arraycopy(arr, insertPos, newArr, insertPos + 1, arr.length - insertPos);
@@ -106,7 +127,9 @@ public class CBPQ {
         }
     }
 
-    private static class SkipNode {
+    // ------------------ SkipNode Class ------------------
+    // Each node in the skip list holds a minimum key and a reference to a SortedChunk.
+    private class SkipNode {
         final int minKey;
         final AtomicReference<SortedChunk> chunk;
         final AtomicReference<SkipNode>[] next;
@@ -122,22 +145,8 @@ public class CBPQ {
         }
     }
 
-    private final SkipNode head;
-    private final Random random;
-
-    public CBPQ() {
-        random = new Random();
-        head = new SkipNode(Integer.MIN_VALUE, null, MAX_LEVEL);
-    }
-
-    private int randomLevel() {
-        int level = 1;
-        while (random.nextDouble() < PROB && level < MAX_LEVEL) {
-            level++;
-        }
-        return level;
-    }
-
+    // ------------------ Core Methods of CBPQ ------------------
+    // deleteMin: finds the first chunk and deletes its minimum value.
     public long deleteMin() {
         SkipNode curr = head.next[0].get();
         while (curr != null) {
@@ -152,6 +161,7 @@ public class CBPQ {
         throw new IllegalStateException("Queue is empty");
     }
 
+    // delete: delete a specific value from a chunk that can contain it.
     public boolean delete(long value) {
         int key = (int) value;
         SkipNode curr = head.next[0].get();
@@ -193,6 +203,8 @@ public class CBPQ {
         }
     }
 
+    // insert: finds the proper chunk via the skip list or creates a new chunk if needed,
+    // then inserts the value.
     public boolean insert(long value) {
         int key = (int) value;
         while (true) {
@@ -214,6 +226,7 @@ public class CBPQ {
         }
     }
 
+    // findInsertionPoint: uses the skip list to find where to insert the new value.
     private SkipNode findInsertionPoint(int key, SkipNode[] update) {
         SkipNode curr = head;
         for (int lvl = MAX_LEVEL - 1; lvl >= 0; lvl--) {
@@ -230,9 +243,10 @@ public class CBPQ {
         return curr;
     }
 
+    // createNewChunk: creates a new SortedChunk and adds it into the skip list.
     private SortedChunk createNewChunk(int key, SkipNode current, SkipNode[] update, int level) {
-        int rangeStart = (key / INITIAL_RANGE) * INITIAL_RANGE;
-        int rangeEnd = rangeStart + INITIAL_RANGE - 1;
+        int rangeStart = (key / initialRange) * initialRange;
+        int rangeEnd = rangeStart + initialRange - 1;
         boolean sortedFlag = (update[0] == head);
         SortedChunk newChunk = new SortedChunk(rangeStart, rangeEnd, sortedFlag);
         SkipNode newNode = new SkipNode(rangeStart, newChunk, level);
@@ -248,6 +262,7 @@ public class CBPQ {
         return newChunk;
     }
 
+    // splitChunk: splits a full chunk into two; values less than or equal to the midpoint go to the lower chunk.
     private void splitChunk(SkipNode node, SortedChunk fullChunk) {
         int low = fullChunk.minKey;
         int high = fullChunk.maxKey;
@@ -273,9 +288,6 @@ public class CBPQ {
                 upperChunk.insert(val);
             }
         }
-        System.out.println("Chunk [" + fullChunk.minKey + "-" + fullChunk.maxKey + "] split into [" +
-                lowerChunk.minKey + "-" + lowerChunk.maxKey + "] (" + (lowerChunk.isSorted ? "sorted" : "unsorted") +
-                ") and [" + upperChunk.minKey + "-" + upperChunk.maxKey + "] (" + (upperChunk.isSorted ? "sorted" : "unsorted") + ")");
         node.chunk.set(lowerChunk);
         int level = randomLevel();
         SkipNode newNode = new SkipNode(upperChunk.minKey, upperChunk, level);
@@ -308,7 +320,7 @@ public class CBPQ {
             System.out.println("No chunks in queue.");
             return;
         }
-        System.out.println("\n---- Current Chunks ----");
+        System.out.println("---- Current Chunks ----");
         while (curr != null) {
             SortedChunk chunk = curr.chunk.get();
             if (chunk != null) {
@@ -316,23 +328,33 @@ public class CBPQ {
             }
             curr = curr.next[0].get();
         }
-        System.out.println("------------------------\n");
+        System.out.println("------------------------");
     }
 
+    // Generate a random level for the skip list.
+    private int randomLevel() {
+        int level = 1;
+        while (random.nextDouble() < PROB && level < MAX_LEVEL) {
+            level++;
+        }
+        return level;
+    }
+
+    // ------------------ Main Method ------------------
     public static void main(String[] args) {
-        final CBPQ pq = new CBPQ();
-        Thread[] threads = new Thread[NUM_THREADS];
-        int half = NUM_THREADS / 2;
+        // Create a CBPQ instance using the constructor with parameters:
+        // numThreads, insertions, deletions, range, chunkCapacity, initialRange.
+        CBPQ pq = new CBPQ(10, 100, 100, 1000, 10, 20);
+
+        Thread[] threads = new Thread[pq.numThreads];
+        int half = pq.numThreads / 2;
+
+        // Producer threads perform insertions.
         for (int i = 0; i < half; i++) {
             threads[i] = new Thread(() -> {
-                for (int j = 0; j < INSERTIONS; j++) {
-                    int num = ThreadLocalRandom.current().nextInt(RANGE);
-                    boolean inserted = pq.insert(num);
-                    if (inserted) {
-                        System.out.println(Thread.currentThread().getName() + " Inserted: " + num);
-                    } else {
-                        System.out.println(Thread.currentThread().getName() + " Duplicate/full, skipped: " + num);
-                    }
+                for (int j = 0; j < pq.insertions; j++) {
+                    int num = ThreadLocalRandom.current().nextInt(pq.range);
+                    pq.insert(num);
                     try {
                         Thread.sleep(10);
                     } catch (InterruptedException e) {
@@ -341,24 +363,20 @@ public class CBPQ {
                 }
             });
         }
-        for (int i = half; i < NUM_THREADS; i++) {
+
+        // Consumer threads perform deletions (either deleteMin or random delete).
+        for (int i = half; i < pq.numThreads; i++) {
             threads[i] = new Thread(() -> {
-                for (int j = 0; j < DELETIONS; j++) {
+                for (int j = 0; j < pq.deletions; j++) {
                     if (ThreadLocalRandom.current().nextBoolean()) {
                         try {
-                            long min = pq.deleteMin();
-                            System.out.println(Thread.currentThread().getName() + " deleteMin: " + min);
+                            pq.deleteMin();
                         } catch (IllegalStateException e) {
-                            System.out.println(Thread.currentThread().getName() + " Queue empty during deleteMin.");
+                            // Ignore if queue is empty.
                         }
                     } else {
-                        int num = ThreadLocalRandom.current().nextInt(RANGE);
-                        boolean deleted = pq.delete(num);
-                        if (deleted) {
-                            System.out.println(Thread.currentThread().getName() + " deleted value: " + num);
-                        } else {
-                            System.out.println(Thread.currentThread().getName() + " delete failed for: " + num);
-                        }
+                        int num = ThreadLocalRandom.current().nextInt(pq.range);
+                        pq.delete(num);
                     }
                     try {
                         Thread.sleep(10);
@@ -368,9 +386,12 @@ public class CBPQ {
                 }
             });
         }
+
+        // Start all threads.
         for (Thread t : threads) {
             t.start();
         }
+        // Wait for all threads to finish.
         for (Thread t : threads) {
             try {
                 t.join();
@@ -378,7 +399,6 @@ public class CBPQ {
                 Thread.currentThread().interrupt();
             }
         }
-        System.out.println("REACHED END");
         pq.printChunks();
     }
 }

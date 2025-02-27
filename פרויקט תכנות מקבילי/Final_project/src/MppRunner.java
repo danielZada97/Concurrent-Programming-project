@@ -1,43 +1,50 @@
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MppRunner {
 
-	private static final int NUM_OPERATIONS = 1000000;
-	private static final int[] NUM_THREADS = {1, 2, 4, 8, 16, 32, 64, 128, 256 };
+	private static final int[] NUM_THREADS = { 1, 2, 4, 8, 16, 32, 64, 96 };
+	private static final int[] num_operations = { 1_000, 10_000, 100_000, 1_000_000 };
 
 	public static void main(String[] args) {
-		runBenchmark("CBPQ");
 
-		runBenchmark("CBPQ2");
+		for (int ops : num_operations) {
+			System.out.println("number of operations:" + ops);
+
+			runBenchmark("CBPQ",ops);
+			runBenchmark("CBPQ2",ops);
+		}
 	}
 
-	private static void runBenchmark(String queueType) {
+	private static void runBenchmark(String queueType,int num_operations) {
 		System.out.printf("\nResults for: %s\n", queueType);
 		System.out.printf("%-10s %-15s %-20s%n", "Threads", "Runtime (ms)", "Throughput (ops/sec)");
 
 		for (int numThreads : NUM_THREADS) {
 			AtomicInteger operationsCompleted = new AtomicInteger(0);
-
 			Object pq = createQueue(queueType);
-
 			Thread[] threads = new Thread[numThreads];
 			long startTime = System.currentTimeMillis();
 
 			for (int i = 0; i < numThreads; i++) {
 				threads[i] = new Thread(() -> {
-					while (operationsCompleted.get() < NUM_OPERATIONS) {
-						if (ThreadLocalRandom.current().nextBoolean()) {
-							int value = ThreadLocalRandom.current().nextInt(1000);
-							insertToQueue(pq, value);
-						} else {
-							try {
-								deleteMinFromQueue(pq);
-							} catch (IllegalStateException e) {
-							}
-						}
-						operationsCompleted.incrementAndGet();
+					int insertCount = (int) (num_operations * 0.9 / numThreads);
+					int deleteCount = (int) (num_operations * 0.1 / numThreads);
+
+					// הכנסת 70% מהאופרציות
+					for (int j = 0; j < insertCount; j++) {
+						insertToQueue(pq, j);
 					}
+
+					// הוצאת 30% מהאופרציות
+					for (int j = 0; j < deleteCount; j++) {
+						try {
+							deleteMinFromQueue(pq);
+						} catch (IllegalStateException e) {
+							// התור ריק - מתעלמים
+						}
+					}
+
+					operationsCompleted.incrementAndGet();
 				});
 			}
 
@@ -45,7 +52,6 @@ public class MppRunner {
 				t.start();
 			}
 
-			// המתנה עד שכל התהליכונים יסיימו
 			for (Thread t : threads) {
 				try {
 					t.join();
@@ -56,10 +62,12 @@ public class MppRunner {
 
 			long endTime = System.currentTimeMillis();
 			long runtime = endTime - startTime;
-			double throughput = (double) NUM_OPERATIONS / runtime * 1000;
+			double throughput = (double) num_operations / runtime * 1000;
 
 			System.out.printf("%-10d %-15d %-20.2f%n", numThreads, runtime, throughput);
+			
 		}
+		System.out.println();
 	}
 
 	private static Object createQueue(String queueType) {
@@ -75,15 +83,11 @@ public class MppRunner {
 	private static void insertToQueue(Object pq, int value) {
 		if (pq instanceof CBPQ2) {
 			((CBPQ2) pq).insert(value);
-		} else if (pq instanceof CBPQ2) {
-			((CBPQ2) pq).insert(value);
 		}
 	}
 
 	private static void deleteMinFromQueue(Object pq) {
 		if (pq instanceof CBPQ2) {
-			((CBPQ2) pq).deleteMin();
-		} else if (pq instanceof CBPQ2) {
 			((CBPQ2) pq).deleteMin();
 		}
 	}
